@@ -1,0 +1,16 @@
+project_id = "fkhefzxrsefkujaxmgxp"
+
+[functions.analyze-plant]
+verify_jwt = false
+
+[functions.get-weather]
+verify_jwt = false
+
+[functions.plant-chatbot]
+verify_jwt = false
+
+[functions.send-notifications]
+verify_jwt = false
+
+[functions.scheduled-tasks]
+verify_jwt = false
