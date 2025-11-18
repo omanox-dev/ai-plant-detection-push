@@ -40,6 +40,7 @@ LLM_URL = os.getenv('LLM_URL')
 LLM_API_KEY = os.getenv('LLM_API_KEY')
 AI_FALLBACK_THRESHOLD = float(os.getenv('AI_FALLBACK_THRESHOLD', '50'))
 ENABLE_AI_TAKEOVER = os.getenv('ENABLE_AI_TAKEOVER', 'true').lower() == 'true'
+ML_ENABLED = os.getenv('ML_ENABLED', 'true').lower() == 'true'
 
 # Global model and labels (single model used twice with different labels)
 MODEL = None
@@ -159,7 +160,10 @@ def startup():
     load_stats()  # Load previous lifetime stats
     USAGE_STATS['start_time'] = datetime.now().isoformat()
     logger.info("🚀 Starting Plant Disease Detection Server with AI Takeover...")
-    load_model_and_labels()
+    if ML_ENABLED:
+        load_model_and_labels()
+    else:
+        logger.info("ℹ️ ML inference disabled via ML_ENABLED=false; skipping model load")
     if LLM_URL and LLM_API_KEY:
         logger.info("✓ Gemini AI complete takeover enabled")
     else:
@@ -479,7 +483,8 @@ async def root():
         'species_labels': len(SPECIES_LABELS) if SPECIES_LABELS else 0,
         'disease_labels': len(DISEASE_LABELS) if DISEASE_LABELS else 0,
         'ai_takeover_enabled': ENABLE_AI_TAKEOVER,
-        'ai_takeover_available': LLM_URL is not None and LLM_API_KEY is not None
+        'ai_takeover_available': LLM_URL is not None and LLM_API_KEY is not None,
+        'ml_enabled': ML_ENABLED
     }
 
 
@@ -495,7 +500,8 @@ async def health():
         'species_labels': len(SPECIES_LABELS) if SPECIES_LABELS else 0,
         'disease_labels': len(DISEASE_LABELS) if DISEASE_LABELS else 0,
         'ai_takeover_enabled': ENABLE_AI_TAKEOVER,
-        'ai_takeover_available': 'yes' if (LLM_URL and LLM_API_KEY) else 'no'
+        'ai_takeover_available': 'yes' if (LLM_URL and LLM_API_KEY) else 'no',
+        'ml_enabled': ML_ENABLED
     }
 
 
@@ -525,6 +531,21 @@ async def predict(file: UploadFile = File(...)):
     except Exception as e:
         USAGE_STATS['errors'] += 1
         raise HTTPException(status_code=400, detail=f'Invalid image: {str(e)}')
+
+    # If ML is disabled via env, route to AI takeover (if enabled) or error
+    if not ML_ENABLED:
+        logger.info("ℹ️ ML is disabled; skipping ML inference")
+        if ENABLE_AI_TAKEOVER:
+            USAGE_STATS['ai_takeovers'] += 1
+            ai_result = await call_gemini_complete_analysis(image_bytes, "Unknown - Unknown", 0.0)
+            if ai_result:
+                return JSONResponse(content=ai_result)
+            else:
+                USAGE_STATS['errors'] += 1
+                raise HTTPException(status_code=503, detail='AI takeover failed and ML is disabled')
+        else:
+            USAGE_STATS['errors'] += 1
+            raise HTTPException(status_code=503, detail='Both ML and AI are disabled; cannot perform inference')
     
     # Step 1: Predict Plant Species (using species labels)
     try:
