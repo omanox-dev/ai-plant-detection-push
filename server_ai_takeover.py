@@ -33,13 +33,18 @@ app.add_middleware(
 
 # Configuration
 MODEL_PATH = os.path.join('final_plant_code', 'new_efficientnetb0_disease_detector.keras')
+SPECIES_LABELS_PATH = os.path.join('final_plant_code', 'species_labels.json')
+DISEASE_LABELS_PATH = os.path.join('final_plant_code', 'disease_labels.json')
+
 LLM_URL = os.getenv('LLM_URL')
 LLM_API_KEY = os.getenv('LLM_API_KEY')
 AI_FALLBACK_THRESHOLD = float(os.getenv('AI_FALLBACK_THRESHOLD', '50'))
+ENABLE_AI_TAKEOVER = os.getenv('ENABLE_AI_TAKEOVER', 'true').lower() == 'true'
 
-# Global model and labels
+# Global model and labels (single model used twice with different labels)
 MODEL = None
-LABELS = None
+SPECIES_LABELS = None
+DISEASE_LABELS = None
 
 # Usage tracking
 STATS_FILE = 'usage_stats.json'
@@ -109,38 +114,41 @@ def update_lifetime_stats():
 
 
 def load_model_and_labels():
-    """Load the TensorFlow model and labels."""
-    global MODEL, LABELS
+    """Load single model with both species and disease labels."""
+    global MODEL, SPECIES_LABELS, DISEASE_LABELS
+    import json
     
+    # Load the single model (will be used twice with different labels)
     if not os.path.exists(MODEL_PATH):
         logger.error(f"Model not found at {MODEL_PATH}")
-        return
-    
-    try:
-        MODEL = tf.keras.models.load_model(MODEL_PATH, compile=False)
-        logger.info(f"✓ Model loaded from {MODEL_PATH}")
-    except Exception as e:
-        logger.error(f"Failed to load model: {e}")
-        return
-    
-    # Load labels from labels.json
-    labels_path = os.path.join('final_plant_code', 'labels.json')
-    if os.path.exists(labels_path):
-        try:
-            import json
-            with open(labels_path, 'r', encoding='utf-8') as f:
-                labels_data = json.load(f)
-                # Handle different formats
-                if isinstance(labels_data, list):
-                    LABELS = labels_data
-                elif isinstance(labels_data, dict):
-                    # If dict, sort by key and extract values
-                    LABELS = [labels_data[str(i)] for i in sorted([int(k) for k in labels_data.keys()])]
-                logger.info(f"✓ Loaded {len(LABELS)} labels from labels.json")
-        except Exception as e:
-            logger.error(f"Failed to load labels: {e}")
     else:
-        logger.warning("Labels file not found")
+        try:
+            MODEL = tf.keras.models.load_model(MODEL_PATH, compile=False)
+            logger.info(f"✓ Model loaded from {MODEL_PATH}")
+        except Exception as e:
+            logger.error(f"Failed to load model: {e}")
+    
+    # Load Species Labels (80 classes)
+    if os.path.exists(SPECIES_LABELS_PATH):
+        try:
+            with open(SPECIES_LABELS_PATH, 'r', encoding='utf-8') as f:
+                SPECIES_LABELS = json.load(f)
+                logger.info(f"✓ Loaded {len(SPECIES_LABELS)} species labels")
+        except Exception as e:
+            logger.error(f"Failed to load species labels: {e}")
+    else:
+        logger.warning(f"Species labels not found at {SPECIES_LABELS_PATH}")
+    
+    # Load Disease Labels (28 classes)
+    if os.path.exists(DISEASE_LABELS_PATH):
+        try:
+            with open(DISEASE_LABELS_PATH, 'r', encoding='utf-8') as f:
+                DISEASE_LABELS = json.load(f)
+                logger.info(f"✓ Loaded {len(DISEASE_LABELS)} disease labels")
+        except Exception as e:
+            logger.error(f"Failed to load disease labels: {e}")
+    else:
+        logger.warning(f"Disease labels not found at {DISEASE_LABELS_PATH}")
 
 
 @app.on_event("startup")
@@ -352,7 +360,8 @@ def preprocess_image(image_bytes: bytes) -> np.ndarray:
 
 
 def analyze_prediction(label: str, confidence: float) -> dict:
-    """Analyze prediction and generate response (used when ML confidence is high)."""
+    """Analyze prediction and generate response (used when ML confidence is high).
+    DEPRECATED: Use create_dual_model_analysis() for dual-model predictions."""
     conf_pct = round(float(confidence), 2)
     label_lower = label.lower()
     
@@ -396,14 +405,81 @@ def analyze_prediction(label: str, confidence: float) -> dict:
     }
 
 
+def create_dual_model_analysis(species_name: str, species_confidence: float, 
+                               disease_name: str, disease_confidence: float) -> dict:
+    """Analyze dual-model predictions (species + disease) and generate structured response."""
+    
+    # Round confidences
+    species_conf = round(float(species_confidence), 2)
+    disease_conf = round(float(disease_confidence), 2)
+    combined_conf = round((species_conf + disease_conf) / 2, 2)
+    
+    # Determine severity based on disease confidence
+    if disease_conf >= 70:
+        severity = 'High'
+    elif disease_conf >= 40:
+        severity = 'Medium'
+    else:
+        severity = 'Low'
+    
+    # Health score inversely proportional to disease confidence
+    health_score = max(0, 100 - int(disease_conf))
+    
+    # Check if it's a healthy condition or actual disease
+    disease_lower = disease_name.lower()
+    is_healthy = 'healthy' in disease_lower or 'normal' in disease_lower
+    
+    if is_healthy:
+        symptoms = []
+        recommendations = [
+            f'{species_name} appears healthy',
+            'Continue regular watering and care',
+            'Monitor periodically for any changes',
+            'Maintain good air circulation'
+        ]
+        disease_detected = False
+    else:
+        symptoms = [
+            'Disease symptoms detected',
+            'Visual abnormalities present',
+            f'Identified as {disease_name}'
+        ]
+        recommendations = [
+            f'Disease detected: {disease_name}',
+            'Isolate affected plant to prevent spread',
+            'Remove severely affected leaves',
+            'Apply appropriate fungicide or treatment',
+            'Monitor other plants for similar symptoms',
+            'Consult plant expert if condition worsens'
+        ]
+        disease_detected = True
+    
+    return {
+        'plantName': species_name,
+        'diseaseDetected': disease_detected,
+        'diseaseName': disease_name if disease_detected else None,
+        'confidence': combined_conf,
+        'speciesConfidence': species_conf,
+        'diseaseConfidence': disease_conf,
+        'severity': severity,
+        'symptoms': symptoms,
+        'recommendations': recommendations,
+        'healthScore': health_score,
+        'modelType': 'dual'  # Indicates this used both models
+    }
+
+
 @app.get('/')
 async def root():
     """Root endpoint."""
     return {
-        'service': 'Plant Disease Detection API with AI Takeover',
+        'service': 'Plant Disease Detection API with AI Takeover (Single Model)',
         'status': 'running',
         'model_loaded': MODEL is not None,
-        'ai_takeover': LLM_URL is not None and LLM_API_KEY is not None
+        'species_labels': len(SPECIES_LABELS) if SPECIES_LABELS else 0,
+        'disease_labels': len(DISEASE_LABELS) if DISEASE_LABELS else 0,
+        'ai_takeover_enabled': ENABLE_AI_TAKEOVER,
+        'ai_takeover_available': LLM_URL is not None and LLM_API_KEY is not None
     }
 
 
@@ -416,22 +492,25 @@ async def health():
     return {
         'status': 'healthy',
         'model': 'loaded',
-        'labels': len(LABELS) if LABELS else 0,
-        'ai_takeover': 'enabled' if (LLM_URL and LLM_API_KEY) else 'disabled'
+        'species_labels': len(SPECIES_LABELS) if SPECIES_LABELS else 0,
+        'disease_labels': len(DISEASE_LABELS) if DISEASE_LABELS else 0,
+        'ai_takeover_enabled': ENABLE_AI_TAKEOVER,
+        'ai_takeover_available': 'yes' if (LLM_URL and LLM_API_KEY) else 'no'
     }
 
 
 @app.get('/labels')
 def get_labels():
-    """Get available plant labels."""
-    if LABELS is None:
-        return JSONResponse(content={'labels': []})
-    return JSONResponse(content={'labels': LABELS})
+    """Get available plant species and disease labels."""
+    return JSONResponse(content={
+        'species': SPECIES_LABELS if SPECIES_LABELS else [],
+        'diseases': DISEASE_LABELS if DISEASE_LABELS else []
+    })
 
 
 @app.post('/predict')
 async def predict(file: UploadFile = File(...)):
-    """Predict plant disease from image with AI takeover on low confidence."""
+    """Predict plant species and disease from image using single model twice."""
     USAGE_STATS['total_requests'] += 1
     USAGE_STATS['predictions'] += 1
     
@@ -447,44 +526,68 @@ async def predict(file: UploadFile = File(...)):
         USAGE_STATS['errors'] += 1
         raise HTTPException(status_code=400, detail=f'Invalid image: {str(e)}')
     
-    # Get ML prediction
+    # Step 1: Predict Plant Species (using species labels)
     try:
-        predictions = MODEL.predict(processed_image, verbose=0)
-        class_idx = int(np.argmax(predictions[0]))
-        ml_confidence = float(predictions[0][class_idx] * 100)
+        species_predictions = MODEL.predict(processed_image, verbose=0)
+        species_idx = int(np.argmax(species_predictions[0]))
+        species_confidence = float(species_predictions[0][species_idx] * 100)
         
-        # Get label
-        if LABELS and class_idx < len(LABELS):
-            ml_label = LABELS[class_idx]
+        if SPECIES_LABELS and species_idx < len(SPECIES_LABELS):
+            species_name = SPECIES_LABELS[species_idx]
         else:
-            ml_label = f'Class_{class_idx}'
+            species_name = f'Unknown_Species_{species_idx}'
         
-        logger.info(f"📊 ML Prediction: {ml_label} ({ml_confidence:.2f}%)")
-        
+        logger.info(f"🌿 Species: {species_name} ({species_confidence:.2f}%)")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f'Prediction failed: {str(e)}')
+        USAGE_STATS['errors'] += 1
+        raise HTTPException(status_code=500, detail=f'Species prediction failed: {str(e)}')
+    
+    # Step 2: Predict Disease (using disease labels, same model)
+    try:
+        disease_predictions = MODEL.predict(processed_image, verbose=0)
+        disease_idx = int(np.argmax(disease_predictions[0]))
+        disease_confidence = float(disease_predictions[0][disease_idx] * 100)
+        
+        if DISEASE_LABELS and disease_idx < len(DISEASE_LABELS):
+            disease_name = DISEASE_LABELS[disease_idx]
+        else:
+            disease_name = f'Unknown_Disease_{disease_idx}'
+        
+        logger.info(f"🔬 Disease: {disease_name} ({disease_confidence:.2f}%)")
+    except Exception as e:
+        USAGE_STATS['errors'] += 1
+        raise HTTPException(status_code=500, detail=f'Disease prediction failed: {str(e)}')
+    
+    # Calculate combined confidence (average of both)
+    combined_confidence = (species_confidence + disease_confidence) / 2
+    
+    # Create combined label for AI context
+    ml_label = f"{species_name} - {disease_name}"
     
     # DECISION: AI Takeover or ML Result?
-    if ml_confidence < AI_FALLBACK_THRESHOLD:
+    if ENABLE_AI_TAKEOVER and combined_confidence < AI_FALLBACK_THRESHOLD:
         USAGE_STATS['ai_takeovers'] += 1
-        logger.info(f"⚠ Low ML confidence ({ml_confidence:.2f}%) - ACTIVATING AI TAKEOVER")
+        logger.info(f"⚠ Low ML confidence ({combined_confidence:.2f}%) - ACTIVATING AI TAKEOVER")
         
         # AI COMPLETE TAKEOVER
-        ai_result = await call_gemini_complete_analysis(image_bytes, ml_label, ml_confidence)
+        ai_result = await call_gemini_complete_analysis(image_bytes, ml_label, combined_confidence)
         
         if ai_result:
             logger.info("✅ Using AI analysis as primary result")
             return JSONResponse(content=ai_result)
         else:
             logger.warning("⚠ AI takeover failed, falling back to ML result")
-            analysis = analyze_prediction(ml_label, ml_confidence)
+            analysis = create_dual_model_analysis(species_name, species_confidence, disease_name, disease_confidence)
             analysis['aiAssist'] = 'AI analysis unavailable - using ML prediction'
             return JSONResponse(content=analysis)
     else:
-        # High ML confidence - use ML result
+        # High ML confidence or AI disabled - use ML result
         USAGE_STATS['ml_predictions'] += 1
-        logger.info(f"✓ High ML confidence ({ml_confidence:.2f}%) - using ML result")
-        analysis = analyze_prediction(ml_label, ml_confidence)
+        if not ENABLE_AI_TAKEOVER:
+            logger.info(f"✓ AI takeover disabled - using ML result ({combined_confidence:.2f}%)")
+        else:
+            logger.info(f"✓ High ML confidence ({combined_confidence:.2f}%) - using ML result")
+        analysis = create_dual_model_analysis(species_name, species_confidence, disease_name, disease_confidence)
         return JSONResponse(content=analysis)
 
 

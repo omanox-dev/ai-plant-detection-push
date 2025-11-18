@@ -186,14 +186,24 @@ const ClimateInfo = () => {
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
             <Input 
               type="text" 
-              placeholder="Search City" 
+              placeholder="Search City (e.g., Mumbai, India)" 
               value={searchQuery} 
               onChange={e => setSearchQuery(e.target.value)} 
               className="pl-10 bg-white/10 border-white/20 text-white placeholder-gray-300" 
             />
           </div>
-          <Button type="submit" size="icon" variant="secondary" disabled={isLoading}>
+          <Button type="submit" size="icon" variant="secondary" disabled={isLoading} title="Search city">
             <Search className="h-4 w-4" />
+          </Button>
+          <Button 
+            type="button" 
+            size="icon" 
+            variant="secondary" 
+            disabled={isLoading}
+            onClick={() => getLocationAndWeather()}
+            title="Use current location"
+          >
+            <MapPin className="h-4 w-4" />
           </Button>
         </form>
 

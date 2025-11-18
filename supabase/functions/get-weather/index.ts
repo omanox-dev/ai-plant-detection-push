@@ -39,8 +39,9 @@ serve(async (req) => {
       coordinates = { lat, lon };
       locationName = `${lat}, ${lon}`;
     } else if (city) {
-      // First get precise coordinates using geocoding
-      const geocodeUrl = `https://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(city)}&limit=1&appid=${weatherApiKey}`;
+      // First get precise coordinates using geocoding with better parameters
+      // Support format: "City, State, Country" or "City, Country" or just "City"
+      const geocodeUrl = `https://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(city)}&limit=5&appid=${weatherApiKey}`;
       const geocodeResponse = await fetch(geocodeUrl);
       
       if (!geocodeResponse.ok) {
@@ -49,12 +50,13 @@ serve(async (req) => {
       
       const geoData = await geocodeResponse.json();
       if (!geoData || geoData.length === 0) {
-        throw new Error('Location not found');
+        throw new Error('Location not found. Try format: "City, Country" for better accuracy');
       }
       
-      const { lat: geoLat, lon: geoLon, name, country } = geoData[0];
+      // Use first result (most relevant)
+      const { lat: geoLat, lon: geoLon, name, state, country } = geoData[0];
       coordinates = { lat: geoLat, lon: geoLon };
-      locationName = `${name}, ${country}`;
+      locationName = state ? `${name}, ${state}, ${country}` : `${name}, ${country}`;
       weatherUrl = `https://api.openweathermap.org/data/2.5/forecast?lat=${geoLat}&lon=${geoLon}&appid=${weatherApiKey}&units=metric`;
     } else {
       return new Response('Either city name or coordinates are required', { 
@@ -140,8 +142,9 @@ serve(async (req) => {
 
   } catch (error) {
     console.error('Error in get-weather function:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Failed to fetch weather data';
     return new Response(JSON.stringify({ 
-      error: error.message || 'Failed to fetch weather data' 
+      error: errorMessage
     }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

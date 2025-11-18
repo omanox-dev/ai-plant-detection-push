@@ -258,7 +258,8 @@ const PlantAnalyzer = ({ onAnalysisComplete }: PlantAnalyzerProps) => {
             <CardTitle className="text-2xl">Plant Disease Detection</CardTitle>
           </div>
           <CardDescription>
-            Upload an image of your medicinal plant for AI-powered disease analysis
+            Upload an image of your medicinal plant for disease analysis
+            {/* AI-powered */}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">

@@ -201,9 +201,9 @@ Keep responses concise but informative. If asked about treatment, provide step-b
           <h3 className="font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
             Plant AI Assistant <Sparkles className="w-4 h-4 text-yellow-500" />
           </h3>
-          <p className="text-xs text-gray-600 dark:text-gray-400">
+          {/* <p className="text-xs text-gray-600 dark:text-gray-400">
             Powered by Gemini AI
-          </p>
+          </p> */}
         </div>
       </div>
 

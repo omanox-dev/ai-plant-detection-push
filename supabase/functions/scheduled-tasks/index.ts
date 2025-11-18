@@ -114,21 +114,32 @@ async function processWeatherUpdates() {
   for (const profile of profiles || []) {
     try {
       // Get precise weather data using geocoding first
-      const geocodeUrl = `https://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(profile.location)}&limit=1&appid=${weatherApiKey}`;
+      // Support format: "City, State, Country" or "City, Country"
+      const geocodeUrl = `https://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(profile.location)}&limit=5&appid=${weatherApiKey}`;
       const geocodeResponse = await fetch(geocodeUrl);
       
       if (!geocodeResponse.ok) {
-        console.error(`Geocoding failed for ${profile.location}`);
+        console.error(`Geocoding failed for ${profile.location}: ${geocodeResponse.statusText}`);
         continue;
       }
       
       const geoData = await geocodeResponse.json();
       if (!geoData || geoData.length === 0) {
-        console.error(`No coordinates found for ${profile.location}`);
+        console.error(`No coordinates found for ${profile.location}. Suggest using format: "City, Country"`);
         continue;
       }
       
-      const { lat, lon } = geoData[0];
+      // Log all found locations for debugging
+      if (geoData.length > 1) {
+        console.log(`Multiple locations found for "${profile.location}":`);
+        geoData.slice(0, 3).forEach((loc: any, i: number) => {
+          console.log(`  ${i + 1}. ${loc.name}, ${loc.state || ''} ${loc.country} (${loc.lat}, ${loc.lon})`);
+        });
+        console.log(`Using first result: ${geoData[0].name}, ${geoData[0].country}`);
+      }
+      
+      const { lat, lon, name, state, country } = geoData[0];
+      const fullLocation = state ? `${name}, ${state}, ${country}` : `${name}, ${country}`;
       
       // Get current weather with precise coordinates
       const weatherUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${weatherApiKey}&units=metric`;
@@ -174,7 +185,7 @@ async function processWeatherUpdates() {
         });
       }
       
-      console.log(`Processed weather update for user ${profile.user_id} in ${profile.location}: ${temp}°C, ${humidity}% humidity`);
+      console.log(`Processed weather update for user ${profile.user_id} in ${fullLocation} (requested: ${profile.location}): ${temp}°C, ${humidity}% humidity`);
       
     } catch (err) {
       console.error(`Failed to process weather update for user ${profile.user_id}:`, err);
