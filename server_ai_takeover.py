@@ -618,6 +618,17 @@ class ChatRequest(BaseModel):
     analysisContext: Optional[dict] = None
 
 
+class TreatmentPlanRequest(BaseModel):
+    """Treatment plan request model."""
+    plantName: str
+    diseaseDetected: bool
+    diseaseName: Optional[str] = None
+    severity: str
+    symptoms: list[str]
+    confidence: float
+    healthScore: int
+
+
 @app.post('/chat')
 async def chat(request: ChatRequest):
     """
@@ -689,6 +700,146 @@ async def chat(request: ChatRequest):
         raise HTTPException(status_code=504, detail="Request timeout")
     except Exception as e:
         logger.error(f"Chat error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post('/generate-treatment-plan')
+async def generate_treatment_plan(request: TreatmentPlanRequest):
+    """
+    Generate AI-powered personalized treatment plan using Gemini AI.
+    Returns detailed day-by-day treatment instructions with actions and care tips.
+    """
+    USAGE_STATS['total_requests'] += 1
+    
+    if not LLM_URL or not LLM_API_KEY:
+        USAGE_STATS['errors'] += 1
+        raise HTTPException(status_code=503, detail="Gemini AI not configured")
+    
+    try:
+        # Build comprehensive prompt for treatment plan
+        symptoms_text = ', '.join(request.symptoms) if request.symptoms else 'No specific symptoms listed'
+        
+        if request.diseaseDetected:
+            prompt = f"""You are a plant disease expert. Create a concise treatment plan for:
+Plant: {request.plantName}
+Disease: {request.diseaseName}
+Severity: {request.severity}
+Symptoms: {symptoms_text}
+
+STRICT FORMAT (each action max 8 words):
+
+DAY 0 - IMMEDIATE ACTION:
+-[action 1]
+-[action 2]
+-[action 3]
+
+DAY 1-3 - INITIAL TREATMENT:
+-[action 1]
+-[action 2]
+-[action 3]
+
+DAY 4-7 - CONTINUED CARE:
+-[action 1]
+-[action 2]
+-[action 3]
+
+DAY 8-14 - RECOVERY:
+-[action 1]
+-[action 2]
+-[action 3]
+
+DAY 15+ - MONITORING:
+-[action 1]
+-[action 2]
+-[action 3]
+
+WATERING TIP: [1 short sentence]
+LIGHT TIP: [1 short sentence]
+TEMPERATURE TIP: [1 short sentence]
+RECOVERY OUTLOOK: [1 sentence about expected recovery time]"""
+        else:
+            prompt = f"""You are a plant care expert. Create a maintenance plan for healthy {request.plantName}.
+
+STRICT FORMAT (brief):
+
+DAILY MAINTENANCE:
+-[action 1]
+-[action 2]
+-[action 3]
+
+WEEKLY CHECKS:
+-[action 1]
+-[action 2]
+-[action 3]
+
+WATERING TIP: [1 sentence]
+LIGHT TIP: [1 sentence]
+TEMPERATURE TIP: [1 sentence]
+PREVENTION: [2 tips to prevent disease]"""
+
+        payload = {
+            "contents": [{
+                "parts": [{
+                    "text": prompt
+                }]
+            }],
+            "generationConfig": {
+                "temperature": 0.5,
+                "topK": 30,
+                "topP": 0.9,
+                "maxOutputTokens": 2800,
+            }
+        }
+        
+        logger.info(f"🤖 Generating AI treatment plan for {request.plantName}...")
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{LLM_URL}?key={LLM_API_KEY}",
+                json=payload,
+                headers={'Content-Type': 'application/json'}
+            )
+            
+            if response.status_code != 200:
+                logger.error(f"Gemini API error: {response.status_code} - {response.text}")
+                raise HTTPException(status_code=response.status_code, detail="Gemini API error")
+            
+            data = response.json()
+            
+            # Track token usage
+            if 'usageMetadata' in data:
+                metadata = data['usageMetadata']
+                prompt_tokens = metadata.get('promptTokenCount', 0)
+                completion_tokens = metadata.get('candidatesTokenCount', 0)
+                total_tokens = metadata.get('totalTokenCount', 0)
+                
+                USAGE_STATS['tokens_input'] += prompt_tokens
+                USAGE_STATS['tokens_output'] += completion_tokens
+                USAGE_STATS['tokens_used'] += total_tokens
+                
+                logger.info(f"🔢 Treatment plan tokens: {total_tokens} total")
+            
+            # Extract AI response
+            if 'candidates' in data and len(data['candidates']) > 0:
+                candidate = data['candidates'][0]
+                if 'content' in candidate and 'parts' in candidate['content']:
+                    ai_plan = candidate['content']['parts'][0].get('text', '')
+                    logger.info(f"✅ AI treatment plan generated ({len(ai_plan)} chars)")
+                    return JSONResponse(content={
+                        'treatmentPlan': ai_plan,
+                        'success': True
+                    })
+            
+            logger.warning("Unexpected Gemini response format")
+            raise HTTPException(status_code=500, detail="Failed to generate treatment plan")
+            
+    except httpx.TimeoutException:
+        logger.error("Gemini API timeout")
+        USAGE_STATS['errors'] += 1
+        raise HTTPException(status_code=504, detail="Request timeout")
+    except Exception as e:
+        logger.error(f"Treatment plan error: {e}")
+        USAGE_STATS['errors'] += 1
         raise HTTPException(status_code=500, detail=str(e))
 
 

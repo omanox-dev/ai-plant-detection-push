@@ -21,6 +21,7 @@ interface WeatherData {
   description: string;
   forecast: ForecastDay[];
   plantCareAdvice: string[];
+  coordinates?: { lat: number; lon: number }; // For debug display
 }
 const ClimateInfo = () => {
   const [weatherData, setWeatherData] = useState<WeatherData | null>(null);
@@ -46,13 +47,16 @@ const ClimateInfo = () => {
         const position = await new Promise<GeolocationPosition>((resolve, reject) => {
           navigator.geolocation.getCurrentPosition(resolve, reject, {
             enableHighAccuracy: true,
-            timeout: 10000,
-            maximumAge: 300000 // 5 minutes
+            timeout: 15000,
+            maximumAge: 0 // Always get fresh location, no cache
           });
         });
         
         requestData.lat = position.coords.latitude;
         requestData.lon = position.coords.longitude;
+        
+        console.log(`📍 Exact location detected: ${position.coords.latitude.toFixed(6)}, ${position.coords.longitude.toFixed(6)} (accuracy: ${position.coords.accuracy}m)`);
+        
         setHasPermission(true);
       }
 
@@ -65,8 +69,16 @@ const ClimateInfo = () => {
 
       if (data.success) {
         const weatherInfo = data;
+        
+        // Use detected location if available and different from weather API city
+        let displayLocation = `${weatherInfo.location.city}, ${weatherInfo.location.country}`;
+        if (weatherInfo.location.detectedLocation && 
+            weatherInfo.location.detectedLocation !== weatherInfo.location.weatherApiCity) {
+          displayLocation = weatherInfo.location.detectedLocation;
+        }
+        
         const processedWeatherData: WeatherData = {
-          location: `${weatherInfo.location.city}, ${weatherInfo.location.country}`,
+          location: displayLocation,
           date: new Date().toLocaleDateString('en-US', {
             weekday: 'long',
             day: 'numeric',
@@ -86,13 +98,14 @@ const ClimateInfo = () => {
             temperature: day.temperature,
             icon: mapWeatherCondition(day.weather)
           })),
-          plantCareAdvice: weatherInfo.care_recommendations
+          plantCareAdvice: weatherInfo.care_recommendations,
+          coordinates: weatherInfo.location.coordinates // Store GPS coords for display
         };
 
         setWeatherData(processedWeatherData);
         toast({
           title: "Weather Updated",
-          description: `Weather information updated for ${processedWeatherData.location}`
+          description: `Weather for ${processedWeatherData.location}${requestData.lat ? ` (${requestData.lat.toFixed(4)}°, ${requestData.lon.toFixed(4)}°)` : ''}`
         });
       } else {
         throw new Error(data.error || 'Failed to fetch weather data');
@@ -213,9 +226,18 @@ const ClimateInfo = () => {
           </div> : weatherData ? <>
             {/* Location and Date */}
             <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <MapPin className="h-5 w-5 text-gray-300" />
-                <span className="text-lg font-medium">{weatherData.location}</span>
+              <div className="flex flex-col">
+                <div className="flex items-center space-x-2">
+                  <MapPin className="h-5 w-5 text-gray-300" />
+                  <span className="text-lg font-medium">{weatherData.location}</span>
+                </div>
+                {weatherData.coordinates && (
+                  <div className="flex items-center space-x-1 ml-7 mt-1">
+                    <span className="text-xs text-gray-400 bg-white/10 px-2 py-0.5 rounded">
+                      📍 {weatherData.coordinates.lat.toFixed(4)}°, {weatherData.coordinates.lon.toFixed(4)}°
+                    </span>
+                  </div>
+                )}
               </div>
               <span className="text-gray-300">{weatherData.date}</span>
             </div>

@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 const weatherApiKey = Deno.env.get('WEATHER_API_KEY');
+const googleMapsApiKey = Deno.env.get('GOOGLE_MAPS_API_KEY'); // Optional: for precise locality names
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -34,10 +35,78 @@ serve(async (req) => {
     let coordinates = { lat: 0, lon: 0 };
     
     if (lat && lon) {
-      // Use precise coordinates directly
-      weatherUrl = `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${weatherApiKey}&units=metric`;
+      // Try Google Maps reverse geocoding first (much more accurate for localities)
+      if (googleMapsApiKey) {
+        try {
+          const googleGeoUrl = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lon}&key=${googleMapsApiKey}&result_type=sublocality|locality|political`;
+          const googleResponse = await fetch(googleGeoUrl);
+          
+          if (googleResponse.ok) {
+            const googleData = await googleResponse.json();
+            if (googleData.status === 'OK' && googleData.results.length > 0) {
+              const result = googleData.results[0];
+              
+              // Extract detailed address components
+              let sublocality = '';
+              let locality = '';
+              let administrativeArea = '';
+              let country = '';
+              
+              for (const component of result.address_components) {
+                if (component.types.includes('sublocality') || component.types.includes('sublocality_level_1')) {
+                  sublocality = component.long_name;
+                }
+                if (component.types.includes('locality')) {
+                  locality = component.long_name;
+                }
+                if (component.types.includes('administrative_area_level_1')) {
+                  administrativeArea = component.short_name;
+                }
+                if (component.types.includes('country')) {
+                  country = component.short_name;
+                }
+              }
+              
+              // Build precise location string: "Kondwa, Pune, Maharashtra, IN"
+              const parts = [sublocality, locality, administrativeArea, country].filter(p => p);
+              locationName = parts.join(', ');
+              
+              console.log(`📍 Google Maps: Precise location detected - ${locationName}`);
+            }
+          }
+        } catch (error) {
+          console.warn('Google Maps geocoding failed, falling back to OpenWeather:', error);
+        }
+      }
+      
+      // Fallback to OpenWeather reverse geocoding if Google Maps unavailable
+      if (!locationName) {
+        const reverseGeoUrl = `https://api.openweathermap.org/geo/1.0/reverse?lat=${lat}&lon=${lon}&limit=5&appid=${weatherApiKey}`;
+        const reverseGeoResponse = await fetch(reverseGeoUrl);
+        
+        if (reverseGeoResponse.ok) {
+          const reverseGeoData = await reverseGeoResponse.json();
+          if (reverseGeoData && reverseGeoData.length > 0) {
+            let bestMatch = reverseGeoData[0];
+            for (const location of reverseGeoData) {
+              if (location.state && !bestMatch.state) {
+                bestMatch = location;
+                break;
+              }
+            }
+            
+            const { name, state, country } = bestMatch;
+            locationName = state ? `${name}, ${state}, ${country}` : `${name}, ${country}`;
+          } else {
+            locationName = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+          }
+        } else {
+          locationName = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+        }
+      }
+      
       coordinates = { lat, lon };
-      locationName = `${lat}, ${lon}`;
+      weatherUrl = `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${weatherApiKey}&units=metric`;
     } else if (city) {
       // First get precise coordinates using geocoding with better parameters
       // Support format: "City, State, Country" or "City, Country" or just "City"
@@ -130,7 +199,10 @@ serve(async (req) => {
         name: locationName,
         city: weatherData.city.name,
         country: weatherData.city.country,
-        coordinates: coordinates
+        coordinates: coordinates,
+        // Add detected vs API city for transparency
+        detectedLocation: locationName,
+        weatherApiCity: `${weatherData.city.name}, ${weatherData.city.country}`
       },
       current: dailyForecasts[0] || null,
       forecast: dailyForecasts,

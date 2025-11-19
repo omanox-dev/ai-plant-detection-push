@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Upload, Camera, Leaf, AlertTriangle, CheckCircle, Info, XCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import TreatmentGuide from './TreatmentGuide';
 
 interface AnalysisResult {
   plantName: string;
@@ -429,6 +430,14 @@ const PlantAnalyzer = ({ onAnalysisComplete }: PlantAnalyzerProps) => {
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {/* Smart Treatment Guide - Hero Feature */}
+      {analysisResult && (
+        <TreatmentGuide 
+          analysis={analysisResult}
+          imageUrl={imageUrl || undefined}
+        />
       )}
     </div>
   );
