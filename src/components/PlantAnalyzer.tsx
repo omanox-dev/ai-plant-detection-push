@@ -6,6 +6,7 @@ import { Progress } from '@/components/ui/progress';
 import { Upload, Camera, Leaf, AlertTriangle, CheckCircle, Info, XCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import TreatmentGuide from './TreatmentGuide';
+import { supabase } from '@/integrations/supabase/client';
 
 interface AnalysisResult {
   plantName: string;
@@ -30,7 +31,17 @@ const PlantAnalyzer = ({ onAnalysisComplete }: PlantAnalyzerProps) => {
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [labels, setLabels] = useState<string[] | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<any>(null);
   const { toast } = useToast();
+
+  // Get current user
+  useEffect(() => {
+    const getCurrentUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      setCurrentUser(user);
+    };
+    getCurrentUser();
+  }, []);
 
   // Function to validate if image contains a plant
   const validatePlantImage = useCallback(
@@ -177,6 +188,9 @@ const PlantAnalyzer = ({ onAnalysisComplete }: PlantAnalyzerProps) => {
     try {
       const form = new FormData();
       form.append('file', selectedImage);
+      if (currentUser?.id) {
+        form.append('user_id', currentUser.id);
+      }
 
       const res = await fetch('http://127.0.0.1:8000/predict', {
         method: 'POST',

@@ -47,10 +47,21 @@ const Index = () => {
             {!loading && (
               <>
                 {user && (
-                  <div className="flex items-center space-x-2 text-white/90">
-                    <User className="h-4 w-4" />
-                    <span className="text-sm">Welcome back!</span>
-                  </div>
+                  <>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => navigate('/history')}
+                      className="bg-white/10 border-white/20 text-white hover:bg-white/20 backdrop-blur"
+                    >
+                      <Leaf className="h-4 w-4 mr-2" />
+                      My Plants
+                    </Button>
+                    <div className="flex items-center space-x-2 text-white/90">
+                      <User className="h-4 w-4" />
+                      <span className="text-sm">Welcome back!</span>
+                    </div>
+                  </>
                 )}
                 <Button
                   variant="outline"

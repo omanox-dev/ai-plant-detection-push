@@ -1,8 +1,8 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List, Dict, Any
 import numpy as np
 from PIL import Image
 import io
@@ -12,11 +12,31 @@ import tensorflow as tf
 import httpx
 import logging
 from dotenv import load_dotenv
+from supabase import create_client, Client
+from datetime import datetime
+import uuid
+import json
 
 # Load environment variables
 load_dotenv()
 
 app = FastAPI(title="Plant Disease Detection with AI Takeover")
+
+# Supabase Configuration
+SUPABASE_URL = os.getenv('SUPABASE_URL', 'https://fkhefzxrsefkujaxmgxp.supabase.co')
+SUPABASE_SERVICE_KEY = os.getenv('SUPABASE_SERVICE_KEY', os.getenv('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZraGVmenhyc2Vma3VqYXhtZ3hwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTUxNTUyNTYsImV4cCI6MjA3MDczMTI1Nn0.5REzyXJeSHicKEv285DnyIkSLHiSGPuQwyZc5o3p2PU'))
+
+# Initialize Supabase client
+# Initialize Supabase (will be configured after logger setup)
+supabase = None
+DATABASE_ENABLED = False
+
+# Supabase Configuration
+SUPABASE_URL = os.getenv('SUPABASE_URL', 'https://fkhefzxrsefkujaxmgxp.supabase.co')
+SUPABASE_SERVICE_KEY = os.getenv('SUPABASE_SERVICE_KEY', os.getenv('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZraGVmenhyc2Vma3VqYXhtZ3hwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTUxNTUyNTYsImV4cCI6MjA3MDczMTI1Nn0.5REzyXJeSHicKEv285DnyIkSLHiSGPuQwyZc5o3p2PU'))
+
+# Initialize Supabase client
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -155,8 +175,24 @@ def load_model_and_labels():
 @app.on_event("startup")
 def startup():
     """Initialize on server startup."""
-    global USAGE_STATS
+    global USAGE_STATS, supabase, DATABASE_ENABLED
     from datetime import datetime
+    
+    # Initialize Supabase
+    try:
+        from supabase import create_client, Client
+        supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+        DATABASE_ENABLED = True
+        logger.info("✓ Supabase database connected")
+    except ImportError:
+        supabase = None
+        DATABASE_ENABLED = False
+        logger.warning("⚠ Supabase not installed - database features disabled")
+    except Exception as e:
+        supabase = None
+        DATABASE_ENABLED = False
+        logger.error(f"❌ Supabase connection failed: {e}")
+    
     load_stats()  # Load previous lifetime stats
     USAGE_STATS['start_time'] = datetime.now().isoformat()
     logger.info("🚀 Starting Plant Disease Detection Server with AI Takeover...")
@@ -409,6 +445,70 @@ def analyze_prediction(label: str, confidence: float) -> dict:
     }
 
 
+# Database Helper Functions
+async def save_plant_analysis_to_db(analysis_data: dict, image_url: str, user_id: str = None) -> bool:
+    """Save plant analysis to Supabase database."""
+    if not DATABASE_ENABLED or not supabase:
+        return False
+    
+    try:
+        db_record = {
+            'user_id': user_id,
+            'image_url': image_url,
+            'plant_name': analysis_data.get('plantName'),
+            'health_score': analysis_data.get('healthScore'),
+            'has_disease': analysis_data.get('diseaseDetected', False),
+            'disease_name': analysis_data.get('diseaseName'),
+            'confidence': analysis_data.get('confidence'),
+            'severity': analysis_data.get('severity'),
+            'symptoms': analysis_data.get('symptoms', []),
+            'recommendations': analysis_data.get('recommendations', []),
+            'analysis_data': analysis_data,
+            'created_at': datetime.now().isoformat()
+        }
+        
+        result = supabase.table('plant_analyses').insert(db_record).execute()
+        logger.info(f"💾 Analysis saved to database: {result.data[0]['id'] if result.data else 'unknown'}")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Database save failed: {e}")
+        return False
+
+async def get_user_plant_analyses(user_id: str, limit: int = 10) -> List[dict]:
+    """Get user's plant analyses from database."""
+    if not DATABASE_ENABLED or not supabase:
+        return []
+    
+    try:
+        result = supabase.table('plant_analyses')\
+            .select('*')\
+            .eq('user_id', user_id)\
+            .order('created_at', desc=True)\
+            .limit(limit)\
+            .execute()
+        
+        return result.data if result.data else []
+    except Exception as e:
+        logger.error(f"❌ Database query failed: {e}")
+        return []
+
+async def save_plant_to_collection(plant_data: dict) -> bool:
+    """Save plant to user's collection."""
+    if not DATABASE_ENABLED or not supabase:
+        return False
+    
+    try:
+        db_record = plant_data.dict()
+        db_record['created_at'] = datetime.now().isoformat()
+        db_record['updated_at'] = datetime.now().isoformat()
+        
+        result = supabase.table('saved_plants').insert(db_record).execute()
+        logger.info(f"🌱 Plant saved to collection: {result.data[0]['id'] if result.data else 'unknown'}")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Plant save failed: {e}")
+        return False
+
 def create_dual_model_analysis(species_name: str, species_confidence: float, 
                                disease_name: str, disease_confidence: float) -> dict:
     """Analyze dual-model predictions (species + disease) and generate structured response."""
@@ -515,7 +615,7 @@ def get_labels():
 
 
 @app.post('/predict')
-async def predict(file: UploadFile = File(...)):
+async def predict(file: UploadFile = File(...), user_id: Optional[str] = Form(None)):
     """Predict plant species and disease from image using single model twice."""
     USAGE_STATS['total_requests'] += 1
     USAGE_STATS['predictions'] += 1
@@ -595,11 +695,17 @@ async def predict(file: UploadFile = File(...)):
         
         if ai_result:
             logger.info("✅ Using AI analysis as primary result")
+            # Save to database
+            image_b64 = base64.b64encode(image_bytes).decode('utf-8')
+            await save_plant_analysis_to_db(ai_result, f"data:image/jpeg;base64,{image_b64}", user_id)
             return JSONResponse(content=ai_result)
         else:
             logger.warning("⚠ AI takeover failed, falling back to ML result")
             analysis = create_dual_model_analysis(species_name, species_confidence, disease_name, disease_confidence)
             analysis['aiAssist'] = 'AI analysis unavailable - using ML prediction'
+            # Save to database
+            image_b64 = base64.b64encode(image_bytes).decode('utf-8')
+            await save_plant_analysis_to_db(analysis, f"data:image/jpeg;base64,{image_b64}", user_id)
             return JSONResponse(content=analysis)
     else:
         # High ML confidence or AI disabled - use ML result
@@ -609,6 +715,9 @@ async def predict(file: UploadFile = File(...)):
         else:
             logger.info(f"✓ High ML confidence ({combined_confidence:.2f}%) - using ML result")
         analysis = create_dual_model_analysis(species_name, species_confidence, disease_name, disease_confidence)
+        # Save to database
+        image_b64 = base64.b64encode(image_bytes).decode('utf-8')
+        await save_plant_analysis_to_db(analysis, f"data:image/jpeg;base64,{image_b64}", user_id)
         return JSONResponse(content=analysis)
 
 
@@ -622,6 +731,36 @@ class TreatmentPlanRequest(BaseModel):
     """Treatment plan request model."""
     plantName: str
     diseaseDetected: bool
+    diseaseName: Optional[str] = None
+    severity: Optional[str] = None
+    symptoms: Optional[List[str]] = None
+    confidence: Optional[float] = None
+    healthScore: Optional[int] = None
+
+class PlantAnalysisDB(BaseModel):
+    """Plant analysis database model."""
+    user_id: Optional[str] = None
+    image_url: str
+    plant_name: Optional[str] = None
+    health_score: Optional[int] = None
+    has_disease: Optional[bool] = None
+    disease_name: Optional[str] = None
+    confidence: Optional[float] = None
+    severity: Optional[str] = None
+    symptoms: Optional[List[str]] = None
+    recommendations: Optional[List[str]] = None
+    analysis_data: Optional[Dict[str, Any]] = None
+
+class SavedPlantDB(BaseModel):
+    """Saved plant database model."""
+    user_id: str
+    plant_name: str
+    plant_type: Optional[str] = None
+    description: Optional[str] = None
+    location: Optional[str] = None
+    image_url: Optional[str] = None
+    health_status: Optional[str] = None
+    care_notes: Optional[str] = None
     diseaseName: Optional[str] = None
     severity: str
     symptoms: list[str]
@@ -1150,6 +1289,59 @@ async def secret_stats():
     
     return HTMLResponse(content=html)
 
+
+# Database API Endpoints
+@app.get('/api/analyses/{user_id}')
+async def get_user_analyses(user_id: str, limit: int = 10):
+    """Get user's plant analyses from database."""
+    if not DATABASE_ENABLED:
+        raise HTTPException(status_code=503, detail="Database not available")
+    
+    try:
+        analyses = await get_user_plant_analyses(user_id, limit)
+        return JSONResponse(content={"success": True, "data": analyses, "count": len(analyses)})
+    except Exception as e:
+        logger.error(f"❌ Failed to get user analyses: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post('/api/save-plant')
+async def save_plant_endpoint(plant_data: dict):
+    """Save plant to user's collection."""
+    if not DATABASE_ENABLED:
+        raise HTTPException(status_code=503, detail="Database not available")
+    
+    try:
+        success = await save_plant_to_collection(plant_data)
+        if success:
+            return JSONResponse(content={"success": True, "message": "Plant saved successfully"})
+        else:
+            raise HTTPException(status_code=500, detail="Failed to save plant")
+    except Exception as e:
+        logger.error(f"❌ Failed to save plant: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get('/api/plants/{user_id}')
+async def get_user_plants(user_id: str):
+    """Get user's saved plants."""
+    if not DATABASE_ENABLED:
+        raise HTTPException(status_code=503, detail="Database not available")
+    
+    try:
+        result = supabase.table('saved_plants').select('*').eq('user_id', user_id).order('created_at', desc=True).execute()
+        plants = result.data if result.data else []
+        return JSONResponse(content={"success": True, "data": plants, "count": len(plants)})
+    except Exception as e:
+        logger.error(f"❌ Failed to get user plants: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get('/api/database/status')
+async def database_status():
+    """Check database connection status."""
+    return JSONResponse(content={
+        "database_enabled": DATABASE_ENABLED,
+        "supabase_connected": supabase is not None,
+        "tables": ["plant_analyses", "saved_plants", "profiles", "care_reminders"] if DATABASE_ENABLED else []
+    })
 
 if __name__ == '__main__':
     import uvicorn
