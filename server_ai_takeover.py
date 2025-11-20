@@ -451,6 +451,11 @@ async def save_plant_analysis_to_db(analysis_data: dict, image_url: str, user_id
     if not DATABASE_ENABLED or not supabase:
         return False
     
+    # Skip saving if no valid user_id (user_id is required by database schema)
+    if not user_id:
+        logger.warning("⚠️ Skipping database save - no user_id provided")
+        return False
+    
     try:
         db_record = {
             'user_id': user_id,
@@ -459,12 +464,12 @@ async def save_plant_analysis_to_db(analysis_data: dict, image_url: str, user_id
             'health_score': analysis_data.get('healthScore'),
             'has_disease': analysis_data.get('diseaseDetected', False),
             'disease_name': analysis_data.get('diseaseName'),
-            'confidence': analysis_data.get('confidence'),
-            'severity': analysis_data.get('severity'),
+            'confidence': float(analysis_data.get('confidence', 0)) if analysis_data.get('confidence') else None,
+            'severity': analysis_data.get('severity', '').lower() if analysis_data.get('severity') else 'low',
             'symptoms': analysis_data.get('symptoms', []),
             'recommendations': analysis_data.get('recommendations', []),
-            'analysis_data': analysis_data,
-            'created_at': datetime.now().isoformat()
+            'analysis_data': analysis_data
+            # removed created_at - let database set it with DEFAULT now()
         }
         
         result = supabase.table('plant_analyses').insert(db_record).execute()

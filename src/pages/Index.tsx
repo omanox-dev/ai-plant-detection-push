@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import PlantAnalyzer from '@/components/PlantAnalyzer';
 import ClimateInfo from '@/components/ClimateInfo';
 import GeminiChatbot from '@/components/GeminiChatbot';
+import CurrentWeather from '@/components/CurrentWeather';
 import { Button } from '@/components/ui/button';
 import { Leaf, Stethoscope, Brain, User, LogOut } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -146,6 +147,8 @@ const Index = () => {
             <div className="text-center" id="plant-chatbot">
               <GeminiChatbot analysisContext={analysisResult} />
             </div>
+            {/* Current Weather - directly under chatbot */}
+            <CurrentWeather />
           </div>
         </section>
 

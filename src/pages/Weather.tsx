@@ -146,65 +146,9 @@ const Weather = () => {
             </CardContent>
           </Card>
         ) : location ? (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Interactive Weather Map */}
+          <div className="w-full">
+            {/* Weather Radar - Full Width */}
             <Card className="bg-white/80 backdrop-blur-sm">
-              <CardContent className="p-0">
-                <div className="p-4 border-b">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-semibold text-lg">🗺️ Interactive Weather Map</h3>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => window.open(`https://openweathermap.org/weathermap?basemap=map&cities=true&layer=temperature&lat=${location.lat}&lon=${location.lon}&zoom=10`, '_blank')}
-                    >
-                      <ExternalLink className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-                <div className="h-96">
-                  <iframe
-                    src={`https://openweathermap.org/weathermap?basemap=map&cities=true&layer=temperature&lat=${location.lat}&lon=${location.lon}&zoom=10`}
-                    width="100%"
-                    height="100%"
-                    frameBorder="0"
-                    style={{ border: 'none' }}
-                    title="OpenWeather Map"
-                  />
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Current Weather Widget */}
-            <Card className="bg-white/80 backdrop-blur-sm">
-              <CardContent className="p-0">
-                <div className="p-4 border-b">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-semibold text-lg">🌤️ Current Weather</h3>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => window.open(`https://openweathermap.org/city/${location.lat},${location.lon}`, '_blank')}
-                    >
-                      <ExternalLink className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-                <div className="h-96">
-                  <iframe
-                    src={`https://openweathermap.org/find?q=${encodeURIComponent(location.name)}&zoom=1&units=metric`}
-                    width="100%"
-                    height="100%"
-                    frameBorder="0"
-                    style={{ border: 'none' }}
-                    title="OpenWeather Current"
-                  />
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Weather Radar */}
-            <Card className="bg-white/80 backdrop-blur-sm lg:col-span-2">
               <CardContent className="p-0">
                 <div className="p-4 border-b">
                   <div className="flex items-center justify-between">
@@ -218,7 +162,7 @@ const Weather = () => {
                     </Button>
                   </div>
                 </div>
-                <div className="h-96">
+                <div className="h-[600px]">
                   <iframe
                     src={`https://openweathermap.org/weathermap?basemap=map&cities=true&layer=radar&lat=${location.lat}&lon=${location.lon}&zoom=8`}
                     width="100%"
